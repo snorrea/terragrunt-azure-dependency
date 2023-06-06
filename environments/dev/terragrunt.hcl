@@ -17,9 +17,6 @@ remote_state {
     path      = "backend.tf"
     if_exists = "overwrite_terragrunt"
   }
-
-  # Hacky workaround to address this issue: https://github.com/gruntwork-io/terragrunt/issues/1330
-  disable_dependency_optimization = true 
 }
 
 generate "provider" {
