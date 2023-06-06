@@ -1,0 +1,94 @@
+---
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: "ubuntu-latest"
+
+variables:
+- group: my_variable_group
+
+stages:
+  - stage: Dev
+    jobs:
+      - job: DevDeploy
+        displayName: "Deploy to Dev"
+        steps:
+          - checkout: self
+          - template: download-terragrunt.yaml
+          - task: AzureCLI@2
+            displayName: "Terragrunt Apply Test"
+            inputs:
+              azureSubscription: "DevTestServiceConnectionARM"
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                export ARM_CLIENT_ID=$(dev_client_id)
+                export ARM_CLIENT_SECRET=$(dev_client_secret)
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                export ARM_TENANT_ID=$(az account show --query tenantId -o tsv)
+                export TF_LOGS="DEBUG"
+                cd infrastructure_terragrunt/environments/dev
+                unset ARM_CLIENT_ID
+                unset ARM_CLIENT_SECRET
+                unset ARM_SUBSCRIPTION_ID
+                unset ARM_TENANT_ID
+                terragrunt run-all init  --terragrunt-log-level debug --terragrunt-non-interactive
+                terragrunt run-all apply --terragrunt-log-level debug -auto-approve --terragrunt-non-interactive
+
+  - stage: Test
+    dependsOn: Dev
+    jobs:
+      - job: TestDeploy
+        displayName: "Deploy to Test"
+        steps:
+          - checkout: self
+          - template: download-terragrunt.yaml
+          - task: AzureCLI@2
+            displayName: "Terragrunt Apply Test"
+            inputs:
+              azureSubscription: "DevTestServiceConnectionARM"
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                export ARM_CLIENT_ID=$(dev_client_id)
+                export ARM_CLIENT_SECRET=$(dev_client_secret)
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                export ARM_TENANT_ID=$(az account show --query tenantId -o tsv)
+                cd infrastructure_terragrunt/environments/test
+                terragrunt run-all init  --terragrunt-log-level debug --terragrunt-non-interactive
+                terragrunt run-all apply --terragrunt-log-level debug -auto-approve --terragrunt-non-interactive
+
+  - stage: Prod
+    dependsOn: Test    
+    jobs:
+      - job: waitForValidation
+        displayName: Wait for external validation
+        pool: server
+        timeoutInMinutes: 4320 # job times out in 3 days
+        steps:
+          - task: ManualValidation@0
+            inputs:
+              notifyUsers: ""
+              instructions: "Ensure test environment is sufficiently tested before deploying to production."
+              onTimeout: "reject"
+      - job: ProdDeploy
+        steps:
+          - checkout: self
+          - template: download-terragrunt.yaml
+          - task: AzureCLI@2
+            displayName: "Terragrunt Apply Prod"
+            inputs:
+              azureSubscription: "ProdServiceConnectionARM"
+              scriptType: "bash"
+              scriptLocation: "inlineScript"
+              inlineScript: |
+                export ARM_CLIENT_ID=$(prod_client_id)
+                export ARM_CLIENT_SECRET=$(prod_client_secret)
+                export ARM_SUBSCRIPTION_ID=$(az account show --query id -o tsv)
+                export ARM_TENANT_ID=$(az account show --query tenantId -o tsv)
+                cd infrastructure_terragrunt/environments/prod
+                terragrunt run-all init  --terragrunt-log-level debug --terragrunt-non-interactive
+                terragrunt run-all apply --terragrunt-log-level debug -auto-approve --terragrunt-non-interactive
